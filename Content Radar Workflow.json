@@ -1,0 +1,1440 @@
+{
+  "name": "For insta 1",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "b6620f42-485e-4255-812f-642cdfa50a16",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1568,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_SHEET_URL",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "",
+          "cachedResultUrl": ""
+        }
+      },
+      "id": "e6b3133c-022d-4f54-b4a5-30f087f1f521",
+      "name": "Read Config",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -1328,
+        80
+      ],
+      "notes": "Reads config from the 'Config' tab. Expects one data row with: niche_name, keywords, hashtags_x, hashtags_instagram, hashtags_tiktok, hashtags_youtube, language_output, min_views, time_window_days, platforms."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Read Config from upstream Read Config node, build run context.\n// Falls back to sensible defaults if Config sheet is empty.\nconst now = new Date();\nconst local = new Date(now.toLocaleString('en-US', { timeZone: 'UTC' }));\nconst pad = n => String(n).padStart(2, '0');\nconst run_id =\n  `content_radar_${local.getFullYear()}${pad(local.getMonth() + 1)}${pad(local.getDate())}` +\n  `_${pad(local.getHours())}${pad(local.getMinutes())}${pad(local.getSeconds())}`;\n\n// Read first row of Config sheet (Read Config feeds in upstream).\nconst config = $input.first()?.json || {};\n\n// Helpers\nconst str = (v, fb) => {\n  const s = String(v ?? '').trim();\n  return s.length ? s : fb;\n};\nconst num = (v, fb) => {\n  const n = Number(v);\n  return Number.isFinite(n) && n > 0 ? n : fb;\n};\n\nconst time_window_days = num(config.time_window_days, 5);\nconst min_views = num(config.min_views, 5000);\nconst windowMs = now.getTime() - time_window_days * 24 * 60 * 60 * 1000;\n\n// Default config \u2014 gets used if Config sheet is empty/missing.\n// Tuned for AI/automation niche so the workflow does something useful on first run.\nconst DEFAULTS = {\n  niche_name: 'AI for solopreneurs',\n  keywords: 'ai automation, n8n, claude code, ai agents',\n  hashtags_x: 'aiagents, aiautomation, claudecode, n8n',\n  hashtags_instagram: 'aitools, claudecode, aiautomation, n8n',\n  hashtags_tiktok: 'aiautomation, n8nworkflow, claudecode, aitools',\n  hashtags_youtube: 'aiagents, claudecode, n8n, aishorts',\n  language_output: 'english',\n  platforms: 'x, instagram, tiktok'\n};\n\nreturn [{\n  json: {\n    run_id,\n    scraped_at: now.toISOString(),\n    nowMs: now.getTime(),\n    windowMs,\n    windowIso: new Date(windowMs).toISOString(),\n    time_window_days,\n    min_views,\n    niche_name: str(config.niche_name, DEFAULTS.niche_name),\n    keywords: str(config.keywords, DEFAULTS.keywords),\n    hashtags_x: str(config.hashtags_x, DEFAULTS.hashtags_x),\n    hashtags_instagram: str(config.hashtags_instagram, DEFAULTS.hashtags_instagram),\n    hashtags_tiktok: str(config.hashtags_tiktok, DEFAULTS.hashtags_tiktok),\n    hashtags_youtube: str(config.hashtags_youtube, DEFAULTS.hashtags_youtube),\n    language_output: str(config.language_output, DEFAULTS.language_output).toLowerCase(),\n    platforms: str(config.platforms, DEFAULTS.platforms),\n    target_window: '00:00'  // legacy column kept for Raw_Posts schema\n  }\n}];"
+      },
+      "id": "cb5804b1-62b0-421e-9c09-28da8496469c",
+      "name": "Initialize Run",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1088,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Fan out the single config item into one item per enabled platform.\n// Each emitted item carries the full ctx + a `platform` field so Switch can route.\nconst ctx = $input.first().json;\n\nconst platforms = String(ctx.platforms || 'x, instagram, tiktok')\n  .split(',')\n  .map(s => s.trim().toLowerCase())\n  .map(p => p === 'twitter' ? 'x' : p)\n  .filter(p => ['x', 'instagram', 'tiktok', 'youtube'].includes(p));\n\nif (platforms.length === 0) {\n  return [{ json: { _empty: true, stage: 'no_platforms', run_id: ctx.run_id } }];\n}\n\nreturn platforms.map(platform => ({\n  json: { ...ctx, platform }\n}));"
+      },
+      "id": "3ece63c0-ddbc-4c37-866f-3f29c25956a9",
+      "name": "Build Platform Inputs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -848,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "f1c5dd11-4e67-468f-a7e3-5fb63821d52e",
+                    "leftValue": "={{ $json.platform }}",
+                    "rightValue": "x",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "x"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "4e7e8c96-acd5-4fe2-ad13-7cd8efd173ec",
+                    "leftValue": "={{ $json.platform }}",
+                    "rightValue": "instagram",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "instagram"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "9e1bf770-0cea-4a8b-b509-3f39808abc47",
+                    "leftValue": "={{ $json.platform }}",
+                    "rightValue": "tiktok",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "tiktok"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "135e6418-8205-4b2a-8f34-d319d3828c43",
+                    "leftValue": "={{ $json.platform }}",
+                    "rightValue": "youtube",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "youtube"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e042ca49-972a-402c-a821-d938a298d1c1",
+      "name": "Switch by Platform",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -608,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build X / Twitter search input for apidojo/tweet-scraper.\n// Each search term becomes a separate query \u2014 keywords + hashtags both included.\nconst ctx = $input.first().json;\n\nconst keywords = String(ctx.keywords || '')\n  .split(',').map(s => s.trim()).filter(Boolean);\nconst hashtags = String(ctx.hashtags_x || '')\n  .split(',').map(s => s.trim()).filter(Boolean)\n  .map(h => '#' + h.replace(/^#/, ''));\n\nconst searchTerms = [...keywords, ...hashtags];\n\nif (searchTerms.length === 0) {\n  return [{ json: { _empty: true, stage: 'prepare_x_no_terms', run_id: ctx.run_id, platform: 'x' } }];\n}\n\n// 30 tweets per term, sorted by Top to surface viral content (not just newest).\nconst apifyBody = {\n  searchTerms,\n  maxItems: 30 * searchTerms.length,\n  sort: 'Top'\n};\n\nreturn [{ json: { ...ctx, apifyBody, platform: 'x' } }];"
+      },
+      "id": "c8f042b8-4a8e-48f1-889b-78c2c56106a8",
+      "name": "Prepare X Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -368,
+        -224
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apify.com/v2/acts/apidojo~tweet-scraper/run-sync-get-dataset-items?timeout=300&limit=5000",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.apifyBody) }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "1ef3c035-cfa8-441c-8fe5-60f9e792a785",
+      "name": "Scrape X via Apify",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -128,
+        -224
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize X / Twitter posts (apidojo/tweet-scraper hashtag/search output).\n// We're scraping by hashtag/keyword now, so author is whoever posted \u2014 no creator map.\nconst ctx = $('Initialize Run').first().json;\nconst tweets = $input.all();\n\nif (tweets.length === 0) {\n  return [{ json: { _empty: true, stage: 'normalize_x', run_id: ctx.run_id } }];\n}\n\nfunction pickAuthor(t) {\n  return String(\n    (t.author && (t.author.userName || t.author.username)) ||\n    (t.user && (t.user.screen_name || t.user.username)) ||\n    t.username || t.authorUsername || ''\n  ).toLowerCase();\n}\n\nfunction pickFollowers(t) {\n  return Number(\n    (t.author && (t.author.followers || t.author.followersCount)) ||\n    (t.user && (t.user.followers_count || t.user.followersCount)) ||\n    0\n  );\n}\n\nfunction pickImage(t) {\n  if (Array.isArray(t.media) && t.media[0]) {\n    const f = t.media[0];\n    if (typeof f === 'string') return f;\n    return f.url || f.media_url_https || f.mediaUrl || '';\n  }\n  if (t.entities && Array.isArray(t.entities.media) && t.entities.media[0]) {\n    return t.entities.media[0].media_url_https || '';\n  }\n  return '';\n}\n\nconst out = [];\nfor (const item of tweets) {\n  const t = item.json || {};\n  const author = pickAuthor(t);\n  if (!author) continue;\n\n  const text = String(t.text || t.full_text || t.fullText || '');\n  const createdAtRaw = t.createdAt || t.created_at || t.date || '';\n  const post_id = String(t.id || t.id_str || t.tweetId || '');\n  const post_url = String(t.url || t.tweetUrl ||\n    (post_id && author ? `https://twitter.com/${author}/status/${post_id}` : ''));\n\n  const likes = Number(t.likeCount || t.favorite_count || t.likes || 0);\n  const views = Number(t.viewCount || t.views || t.impressionsCount || 0);\n  const comments = Number(t.replyCount || t.reply_count || t.comments || 0);\n  const reposts = Number(t.retweetCount || t.retweet_count || t.reposts || 0);\n  const bookmarks = Number(t.bookmarkCount || t.bookmark_count || 0);\n\n  const imageUrl = pickImage(t);\n  const hasVideo = Array.isArray(t.media) && t.media.some(m =>\n    typeof m === 'object' && (m.type === 'video' || m.type === 'animated_gif')\n  );\n  const isReply = Boolean(t.isReply || t.in_reply_to_status_id || t.inReplyToStatusId);\n  const isRepost = Boolean(t.isRetweet || t.retweeted_status || t.isRepost);\n\n  let createdMs = null;\n  if (createdAtRaw) {\n    const d = new Date(createdAtRaw);\n    if (!isNaN(d.getTime())) createdMs = d.getTime();\n  }\n  const post_age_hours = createdMs\n    ? Math.max(0.01, (ctx.nowMs - createdMs) / 3600000)\n    : 9999;\n  const engagement_total = likes + comments * 3 + reposts * 4 + bookmarks * 2;\n  const engagement_rate = views > 0 ? engagement_total / views : 0;\n\n  out.push({\n    json: {\n      run_id: ctx.run_id, scraped_at: ctx.scraped_at, target_window: ctx.target_window,\n      platform: 'x',\n      author,\n      author_followers: pickFollowers(t),\n      creator_type: '',\n      niche: ctx.niche_name || '',\n      source_priority: 'medium',\n      post_id, post_url,\n      created_at: createdMs ? new Date(createdMs).toISOString() : '',\n      created_at_ms: createdMs || 0,\n      post_age_hours: Math.round(post_age_hours * 100) / 100,\n      text,\n      image_url: imageUrl, drive_image_url: '',\n      likes, views, comments, reposts, bookmarks,\n      engagement_total,\n      engagement_rate: Math.round(engagement_rate * 10000) / 10000,\n      has_image: imageUrl !== '', has_video: hasVideo,\n      is_reply: isReply, is_repost: isRepost\n    }\n  });\n}\nreturn out;"
+      },
+      "id": "13a31e4a-bad6-4363-95d3-6e825a148b9d",
+      "name": "Normalize X Posts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        112,
+        -224
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Instagram input for apify/instagram-scraper using hashtag explore URLs.\n// Each hashtag becomes a directUrl pointing at the explore/tags page.\nconst ctx = $input.first().json;\n\nconst hashtags = String(ctx.hashtags_instagram || '')\n  .split(',').map(s => s.trim().replace(/^#/, '')).filter(Boolean);\n\nif (hashtags.length === 0) {\n  return [{ json: { _empty: true, stage: 'prepare_ig_no_tags', run_id: ctx.run_id, platform: 'instagram' } }];\n}\n\nconst directUrls = hashtags.map(h => `https://www.instagram.com/explore/tags/${h}/`);\n\nconst apifyBody = {\n  directUrls,\n  resultsType: 'posts',\n  resultsLimit: 30,\n  addParentData: false\n};\n\nreturn [{ json: { ...ctx, apifyBody, platform: 'instagram' } }];"
+      },
+      "id": "89cac321-5f52-4f80-8646-d48fc670dd68",
+      "name": "Prepare Instagram Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -368,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apify.com/v2/acts/apify~instagram-scraper/run-sync-get-dataset-items?timeout=300&limit=5000",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.apifyBody) }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "3c809505-6fac-4ce0-bb01-97f93ab38123",
+      "name": "Scrape Instagram via Apify",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -128,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize Instagram posts (apify/instagram-scraper hashtag results).\nconst ctx = $('Initialize Run').first().json;\nconst items = $input.all();\n\nif (items.length === 0) {\n  return [{ json: { _empty: true, stage: 'normalize_instagram', run_id: ctx.run_id } }];\n}\n\nconst out = [];\nfor (const item of items) {\n  const t = item.json || {};\n  const author = String(t.ownerUsername || t.username || t.owner?.username || '').toLowerCase();\n  if (!author) continue;\n\n  const text = String(t.caption || t.text || '');\n  const createdAtRaw = t.timestamp || t.takenAtTimestamp || t.taken_at || '';\n  const post_id = String(t.id || t.shortCode || t.shortcode || '');\n  const shortCode = t.shortCode || t.shortcode || '';\n  const post_url = String(t.url || (shortCode ? `https://www.instagram.com/p/${shortCode}/` : ''));\n\n  const likes = Number(t.likesCount || t.likes || 0);\n  const views = Number(t.videoViewCount || t.videoPlayCount || t.viewCount || 0);\n  const comments = Number(t.commentsCount || t.comments || 0);\n  const reposts = 0;\n  const bookmarks = 0;\n  const author_followers = Number(t.ownerFollowersCount || t.followersCount || 0);\n\n  const imageUrl = String(t.displayUrl || (Array.isArray(t.images) && t.images[0]) || '');\n  const typeStr = String(t.type || '').toLowerCase();\n  const hasVideo = Boolean(t.videoUrl) || typeStr === 'video' || typeStr === 'reel';\n\n  let createdMs = null;\n  if (createdAtRaw) {\n    if (typeof createdAtRaw === 'number' && createdAtRaw < 1e12) {\n      createdMs = createdAtRaw * 1000;\n    } else {\n      const d = new Date(createdAtRaw);\n      if (!isNaN(d.getTime())) createdMs = d.getTime();\n    }\n  }\n  const post_age_hours = createdMs\n    ? Math.max(0.01, (ctx.nowMs - createdMs) / 3600000)\n    : 9999;\n  const engagement_total = likes + comments * 3 + reposts * 4 + bookmarks * 2;\n  const engagement_rate = views > 0 ? engagement_total / views : 0;\n\n  out.push({\n    json: {\n      run_id: ctx.run_id, scraped_at: ctx.scraped_at, target_window: ctx.target_window,\n      platform: 'instagram',\n      author,\n      author_followers,\n      creator_type: '',\n      niche: ctx.niche_name || '',\n      source_priority: 'medium',\n      post_id, post_url,\n      created_at: createdMs ? new Date(createdMs).toISOString() : '',\n      created_at_ms: createdMs || 0,\n      post_age_hours: Math.round(post_age_hours * 100) / 100,\n      text,\n      image_url: imageUrl, drive_image_url: '',\n      likes, views, comments, reposts, bookmarks,\n      engagement_total,\n      engagement_rate: Math.round(engagement_rate * 10000) / 10000,\n      has_image: imageUrl !== '' && !hasVideo, has_video: hasVideo,\n      is_reply: false, is_repost: false\n    }\n  });\n}\nreturn out;"
+      },
+      "id": "fcd81d43-9502-4a5c-91ff-f71dbb104095",
+      "name": "Normalize Instagram Posts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        112,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build TikTok input for clockworks/tiktok-scraper using hashtag mode.\nconst ctx = $input.first().json;\n\nconst hashtags = String(ctx.hashtags_tiktok || '')\n  .split(',').map(s => s.trim().replace(/^#/, '')).filter(Boolean);\n\nif (hashtags.length === 0) {\n  return [{ json: { _empty: true, stage: 'prepare_tt_no_tags', run_id: ctx.run_id, platform: 'tiktok' } }];\n}\n\nconst apifyBody = {\n  hashtags,\n  resultsPerPage: 30,\n  shouldDownloadVideos: false,\n  shouldDownloadCovers: false,\n  shouldDownloadSubtitles: false\n};\n\nreturn [{ json: { ...ctx, apifyBody, platform: 'tiktok' } }];"
+      },
+      "id": "9cb0202f-2086-4cf7-a756-7510ae661154",
+      "name": "Prepare TikTok Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -368,
+        176
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apify.com/v2/acts/clockworks~tiktok-scraper/run-sync-get-dataset-items?timeout=300&limit=5000",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.apifyBody) }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "7a327fab-1e54-4483-ab4f-4324b5b89c46",
+      "name": "Scrape TikTok via Apify",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -128,
+        176
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize TikTok posts (clockworks/tiktok-scraper hashtag results).\nconst ctx = $('Initialize Run').first().json;\nconst items = $input.all();\n\nif (items.length === 0) {\n  return [{ json: { _empty: true, stage: 'normalize_tiktok', run_id: ctx.run_id } }];\n}\n\nconst out = [];\nfor (const item of items) {\n  const t = item.json || {};\n  const author = String(t.authorMeta?.name || t.authorMeta?.nickName || t.author || '').toLowerCase();\n  if (!author) continue;\n\n  const text = String(t.text || t.desc || '');\n  const createdAtRaw = t.createTimeISO || t.createTime || '';\n  const post_id = String(t.id || '');\n  const post_url = String(t.webVideoUrl || t.videoUrl ||\n    (post_id && author ? `https://www.tiktok.com/@${author}/video/${post_id}` : ''));\n\n  const likes = Number(t.diggCount || t.likes || 0);\n  const views = Number(t.playCount || t.views || 0);\n  const comments = Number(t.commentCount || t.comments || 0);\n  const reposts = Number(t.shareCount || t.shares || 0);\n  const bookmarks = Number(t.collectCount || 0);\n  const author_followers = Number(t.authorMeta?.fans || t.authorMeta?.followers || 0);\n\n  const coverUrl = String(t.videoMeta?.coverUrl || t.cover || '');\n\n  let createdMs = null;\n  if (createdAtRaw) {\n    if (typeof createdAtRaw === 'number' && createdAtRaw < 1e12) {\n      createdMs = createdAtRaw * 1000;\n    } else {\n      const d = new Date(createdAtRaw);\n      if (!isNaN(d.getTime())) createdMs = d.getTime();\n    }\n  }\n  const post_age_hours = createdMs\n    ? Math.max(0.01, (ctx.nowMs - createdMs) / 3600000)\n    : 9999;\n  const engagement_total = likes + comments * 3 + reposts * 4 + bookmarks * 2;\n  const engagement_rate = views > 0 ? engagement_total / views : 0;\n\n  out.push({\n    json: {\n      run_id: ctx.run_id, scraped_at: ctx.scraped_at, target_window: ctx.target_window,\n      platform: 'tiktok',\n      author,\n      author_followers,\n      creator_type: '',\n      niche: ctx.niche_name || '',\n      source_priority: 'medium',\n      post_id, post_url,\n      created_at: createdMs ? new Date(createdMs).toISOString() : '',\n      created_at_ms: createdMs || 0,\n      post_age_hours: Math.round(post_age_hours * 100) / 100,\n      text,\n      image_url: coverUrl, drive_image_url: '',\n      likes, views, comments, reposts, bookmarks,\n      engagement_total,\n      engagement_rate: Math.round(engagement_rate * 10000) / 10000,\n      has_image: false, has_video: true,\n      is_reply: false, is_repost: false\n    }\n  });\n}\nreturn out;"
+      },
+      "id": "560dd73b-6a50-46d4-80cb-9a0492b9767c",
+      "name": "Normalize TikTok Posts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        112,
+        176
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build YouTube Shorts input for streamers/youtube-scraper.\n// Mix keyword search URLs (filtered to recent uploads) and hashtag URLs.\nconst ctx = $input.first().json;\n\nconst keywords = String(ctx.keywords || '')\n  .split(',').map(s => s.trim()).filter(Boolean);\nconst hashtags = String(ctx.hashtags_youtube || '')\n  .split(',').map(s => s.trim().replace(/^#/, '')).filter(Boolean);\n\nconst startUrls = [\n  // Search URL with sp=CAI%253D = \"Sort by Upload Date\"\n  ...keywords.map(k => ({\n    url: `https://www.youtube.com/results?search_query=${encodeURIComponent(k + ' #shorts')}&sp=CAI%253D`\n  })),\n  ...hashtags.map(h => ({\n    url: `https://www.youtube.com/hashtag/${h}/shorts`\n  }))\n];\n\nif (startUrls.length === 0) {\n  return [{ json: { _empty: true, stage: 'prepare_yt_no_inputs', run_id: ctx.run_id, platform: 'youtube' } }];\n}\n\nconst apifyBody = {\n  startUrls,\n  maxResults: 5,\n  maxResultsShorts: 5,\n  downloadSubtitles: false\n};\n\nreturn [{ json: { ...ctx, apifyBody, platform: 'youtube' } }];"
+      },
+      "id": "fd21d5ee-217e-4e2c-9b28-6343395728b6",
+      "name": "Prepare YouTube Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -368,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apify.com/v2/acts/streamers~youtube-scraper/run-sync-get-dataset-items?timeout=540&limit=5000",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.apifyBody) }}",
+        "options": {
+          "timeout": 540000
+        }
+      },
+      "id": "fd621413-5560-4c93-aa05-5959ac5db904",
+      "name": "Scrape YouTube via Apify",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -128,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize YouTube Shorts posts (streamers/youtube-scraper search/hashtag output).\nconst ctx = $('Initialize Run').first().json;\nconst items = $input.all();\n\nif (items.length === 0) {\n  return [{ json: { _empty: true, stage: 'normalize_youtube', run_id: ctx.run_id } }];\n}\n\nfunction normAuthor(raw) {\n  return String(raw || '').replace('@', '').toLowerCase().trim();\n}\n\nconst out = [];\nfor (const item of items) {\n  const t = item.json || {};\n  const author = normAuthor(\n    t.channelName || t.channel?.name || t.channelUsername || t.author || ''\n  );\n  if (!author) continue;\n\n  const text = String(t.title || t.text || '');\n  const createdAtRaw = t.date || t.uploadDate || t.publishedAt || '';\n  const post_id = String(t.id || t.videoId || '');\n  const post_url = String(t.url || (post_id ? `https://www.youtube.com/shorts/${post_id}` : ''));\n\n  const likes = Number(t.likes || t.likeCount || 0);\n  const views = Number(t.viewCount || t.views || 0);\n  const comments = Number(t.commentsCount || t.commentCount || 0);\n  const reposts = 0;\n  const bookmarks = 0;\n  const author_followers = Number(t.channelSubscriberCount || t.subscribers || 0);\n\n  const imageUrl = String(t.thumbnailUrl || t.thumbnail || '');\n\n  let createdMs = null;\n  if (createdAtRaw) {\n    const d = new Date(createdAtRaw);\n    if (!isNaN(d.getTime())) createdMs = d.getTime();\n  }\n  const post_age_hours = createdMs\n    ? Math.max(0.01, (ctx.nowMs - createdMs) / 3600000)\n    : 9999;\n  const engagement_total = likes + comments * 3 + reposts * 4 + bookmarks * 2;\n  const engagement_rate = views > 0 ? engagement_total / views : 0;\n\n  out.push({\n    json: {\n      run_id: ctx.run_id, scraped_at: ctx.scraped_at, target_window: ctx.target_window,\n      platform: 'youtube',\n      author,\n      author_followers,\n      creator_type: '',\n      niche: ctx.niche_name || '',\n      source_priority: 'medium',\n      post_id, post_url,\n      created_at: createdMs ? new Date(createdMs).toISOString() : '',\n      created_at_ms: createdMs || 0,\n      post_age_hours: Math.round(post_age_hours * 100) / 100,\n      text,\n      image_url: imageUrl, drive_image_url: '',\n      likes, views, comments, reposts, bookmarks,\n      engagement_total,\n      engagement_rate: Math.round(engagement_rate * 10000) / 10000,\n      has_image: false, has_video: true,\n      is_reply: false, is_repost: false\n    }\n  });\n}\nreturn out;"
+      },
+      "id": "1e98f171-cd78-4aaa-b761-47fb6085ad66",
+      "name": "Normalize YouTube Posts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        112,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "id": "13d7a7b6-addb-4017-a0d1-f4e5d6b875fb",
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        496,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Keep posts within configured time window AND drop replies/reposts.\n// Uses windowMs from Initialize Run (computed from time_window_days).\nconst ctx = $('Initialize Run').first().json;\nconst items = $input.all();\n\nconst kept = items.filter(item => {\n  const p = item.json;\n  if (p._empty) return false;\n  if (!p.created_at_ms) return false;\n  if (p.created_at_ms < ctx.windowMs) return false;\n  if (p.is_repost) return false;\n  if (p.is_reply) return false;  // drop \"see thread\" replies\n  return true;\n});\n\nif (kept.length === 0) {\n  return [{ json: { _empty: true, stage: 'filter_window', run_id: ctx.run_id } }];\n}\nreturn kept;"
+      },
+      "id": "905ae121-d34a-44b7-9f15-dbae9d73574e",
+      "name": "Filter Last N Days",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        736,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a284bf16-140d-4ca0-92db-7d6c41f16513",
+              "leftValue": "={{ $json._empty }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "7a51df72-6062-462c-a3a8-f71b9c741f25",
+      "name": "IF Has Recent Posts",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        976,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1feba0a0-7e1a-426c-a1d3-0f764aafcd3d",
+              "name": "stage",
+              "value": "no_recent_posts",
+              "type": "string"
+            },
+            {
+              "id": "16549fae-70f1-45b9-8d28-7a1c77a61473",
+              "name": "message",
+              "value": "No posts found within the configured time window.",
+              "type": "string"
+            },
+            {
+              "id": "01f50212-3f78-43ad-83a3-ffdf3693e8e0",
+              "name": "item_count",
+              "value": "=0",
+              "type": "number"
+            },
+            {
+              "id": "ac2ebd1e-d63a-4f94-acbe-1651a3db0c29",
+              "name": "error",
+              "value": "",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ba59de2d-e6b2-4aba-9ee3-57702dd079de",
+      "name": "Set: Log No Recent Posts",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1024,
+        464
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_SHEET_URL",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "",
+          "cachedResultUrl": ""
+        }
+      },
+      "id": "d7b960c4-ee4c-4b6e-b89e-6b8f443e74d6",
+      "name": "Load Existing Raw Posts",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1216,
+        -96
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "notes": "Reads existing post_url/post_id values for cross-run dedup. executeOnce=true so it runs once per workflow run, not once per incoming post."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Cross-run dedup: skip posts already in Raw_Posts, plus within-run dedup.\n//\n// Lighter alternative if Raw_Posts gets huge: disconnect Load Existing Raw Posts\n// and replace `existingRows` below with `[]`.\nconst ctx = $('Initialize Run').first().json;\nconst incoming = $('Filter Last N Days').all().filter(i => !i.json._empty);\n\nconst existingRows = $input.all();\nconst existingUrls = new Set();\nconst existingIds = new Set();\nfor (const row of existingRows) {\n  const r = row.json || {};\n  if (r.post_url) existingUrls.add(String(r.post_url).trim());\n  if (r.post_id) existingIds.add(String(r.post_id).trim());\n}\n\nconst seen = new Set();\nconst out = [];\n\nfunction dedupeKey(p) {\n  if (p.post_id) return `id:${p.post_id}`;\n  if (p.post_url) return `url:${p.post_url}`;\n  const head = String(p.text || '').slice(0, 100);\n  return `hash:${p.author}|${p.created_at}|${head}`;\n}\n\nfor (const item of incoming) {\n  const p = item.json;\n  const key = dedupeKey(p);\n  if (seen.has(key)) continue;\n  if (p.post_id && existingIds.has(p.post_id)) continue;\n  if (p.post_url && existingUrls.has(p.post_url)) continue;\n  seen.add(key);\n  out.push({ json: p });\n}\n\nif (out.length === 0) {\n  return [{ json: { _empty: true, stage: 'dedupe', run_id: ctx.run_id } }];\n}\nreturn out;"
+      },
+      "id": "7330f9ed-07e6-4f7f-b309-ab3a70e3d120",
+      "name": "Remove Duplicates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1456,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Calculate raw_virality_score (0-100) and detect content pattern.\n// min_views threshold pulled from config (Initialize Run).\nconst ctx = $('Initialize Run').first().json;\nconst minViews = Number(ctx.min_views) || 5000;\n\nconst items = $input.all().filter(i => !i.json._empty);\nif (items.length === 0) return [{ json: { _empty: true, stage: 'score' } }];\n\nconst PATTERNS = {\n  breaking_ai_news: [\n    /\\b(breaking|just announced|just released|just dropped|today.{0,15}released)\\b/i,\n    /\\b(openai|anthropic|google|deepmind|meta|xai)\\b.{0,40}\\b(announce|release|launch|unveil)/i\n  ],\n  new_ai_tool: [/\\b(new tool|introducing|launched|just shipped|now available|out now)\\b/i],\n  tutorial: [/\\b(how to|step.by.step|tutorial|guide|walkthrough|here.s how)\\b/i],\n  contrarian_opinion: [/\\b(unpopular|hot take|nobody is talking|controversial|i disagree)\\b/i],\n  benchmark: [/\\b(benchmark|beats|outperforms|sota|state.of.the.art|score|leaderboard|eval)\\b/i],\n  workflow: [/\\b(workflow|automation|pipeline|i built|i automated|n8n|zapier|make)\\b/i],\n  prompt_framework: [/\\b(prompt|framework|system prompt|template|meta.prompt)\\b/i],\n  ai_agent: [/\\b(ai agent|autonomous agent|agentic|multi.agent|tool.use)\\b/i],\n  business_automation: [/\\b(business|saas|startup|revenue|customers|automate.*work)\\b/i],\n  generative_media: [/\\b(image gen|video gen|midjourney|sora|runway|flux|nano banana|veo|kling|pika|heygen)\\b/i],\n  drama: [/\\b(drama|fired|lawsuit|controversy|leaked|scandal|beef)\\b/i],\n  list_thread: [/^\\d+[\\.\\)]\\s/m, /\\bthread\\b/i, /^\\u{1F9F5}/mu, /\\bmega.thread\\b/i],\n  resource_toolkit: [/\\b(toolkit|resources|list of|free tools|cheat sheet|stack)\\b/i]\n};\n\nconst PATTERN_VALUE = {\n  breaking_ai_news: 15, new_ai_tool: 14, ai_agent: 14, workflow: 13,\n  business_automation: 13, tutorial: 12, generative_media: 12,\n  benchmark: 11, contrarian_opinion: 11, resource_toolkit: 11,\n  prompt_framework: 10, list_thread: 9, drama: 6, general: 5\n};\n\nfunction detectPattern(text) {\n  const t = String(text || '');\n  for (const [k, regs] of Object.entries(PATTERNS)) {\n    if (regs.some(r => r.test(t))) return k;\n  }\n  return 'general';\n}\n\nconst out = [];\nfor (const item of items) {\n  const p = { ...item.json };\n\n  // Engagement floor (uses configured min_views)\n  const minByCount = p.likes + p.comments + p.reposts;\n  const meets_min_engagement =\n    p.views >= minViews || p.likes >= 50 || p.comments >= 5 ||\n    p.reposts >= 5 || minByCount >= 20;\n\n  const engagement_velocity = p.engagement_total / Math.max(p.post_age_hours, 0.5);\n  const content_pattern = detectPattern(p.text);\n\n  // Velocity 0\u201330 \u2014 calibrated so 200/h \u2248 30 points.\n  let velocityScore = Math.min(30, (engagement_velocity / 200) * 30);\n  if (!isFinite(velocityScore) || velocityScore < 0) velocityScore = 0;\n\n  // Engagement rate 0\u201320.\n  let rateScore;\n  if (p.views > 0) {\n    rateScore = Math.min(20, p.engagement_rate * 1000);\n  } else {\n    rateScore = Math.min(10, p.engagement_total / 50);\n  }\n\n  // Recency 0\u201315 \u2014 fresher = higher (now over 5-day window).\n  // 120 hours = 0 points, 0 hours = 15 points.\n  const recencyScore = Math.max(0, 15 * (1 - p.post_age_hours / 120));\n\n  // Pattern 0\u201315\n  const patternScore = PATTERN_VALUE[content_pattern] || 5;\n\n  // Media bonus 0\u20135\n  const mediaBonus = p.has_video ? 5 : (p.has_image ? 3 : 0);\n\n  // Discussion 0\u20135\n  const replyRatio = p.likes > 0 ? p.comments / p.likes : 0;\n  const discussionBonus = Math.min(5, replyRatio * 50);\n\n  // Underdog bonus 0\u201310 \u2014 small accounts hitting big numbers.\n  // If we have follower count and views, reward high view-per-follower ratio.\n  let underdogBonus = 0;\n  if (p.author_followers > 0 && p.views > 0) {\n    const ratio = p.views / p.author_followers;\n    if (ratio > 5) underdogBonus = 10;\n    else if (ratio > 2) underdogBonus = 6;\n    else if (ratio > 1) underdogBonus = 3;\n  }\n\n  let raw =\n    velocityScore + rateScore + recencyScore +\n    patternScore + mediaBonus + discussionBonus + underdogBonus;\n\n  raw = Math.max(0, Math.min(100, Math.round(raw)));\n\n  out.push({\n    json: {\n      ...p,\n      content_pattern,\n      engagement_velocity: Math.round(engagement_velocity * 100) / 100,\n      raw_virality_score: raw,\n      meets_min_engagement,\n      status: meets_min_engagement ? 'scored' : 'low_engagement'\n    }\n  });\n}\n\nreturn out;"
+      },
+      "id": "c8573817-79a8-4a06-90c2-1324bed0ee06",
+      "name": "Calculate Virality Scores",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1696,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Shape rows for Raw_Posts sheet.\nconst items = $input.all().filter(i => !i.json._empty);\nreturn items.map(item => {\n  const p = item.json;\n  return {\n    json: {\n      run_id: p.run_id,\n      scraped_at: p.scraped_at,\n      target_window: p.target_window,\n      platform: p.platform || '',\n      author: p.author,\n      creator_type: p.creator_type,\n      niche: p.niche,\n      post_id: p.post_id,\n      post_url: p.post_url,\n      created_at: p.created_at,\n      post_age_hours: p.post_age_hours,\n      text: String(p.text || '').slice(0, 1000),\n      image_url: p.image_url,\n      drive_image_url: p.drive_image_url || '',\n      likes: p.likes,\n      views: p.views,\n      comments: p.comments,\n      reposts: p.reposts,\n      bookmarks: p.bookmarks,\n      engagement_total: p.engagement_total,\n      engagement_rate: p.engagement_rate,\n      has_image: p.has_image,\n      has_video: p.has_video,\n      is_reply: p.is_reply,\n      is_repost: p.is_repost,\n      raw_virality_score: p.raw_virality_score,\n      source_priority: p.source_priority,\n      status: p.status\n    }\n  };\n});"
+      },
+      "id": "8b750c83-49b2-4451-b00b-f46110642d10",
+      "name": "Format Raw Posts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1936,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_SHEET_URL",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "",
+          "cachedResultUrl": ""
+        }
+      },
+      "id": "e93a8386-6199-442b-bb3f-ff39ce36cf87",
+      "name": "Save Raw Posts",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2176,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Sort by score, keep top 20 above the engagement floor, shape for Filtered_Posts.\nconst ctx = $('Initialize Run').first().json;\nconst items = $input.all().filter(i => !i.json._empty && i.json.meets_min_engagement);\n\nif (items.length === 0) {\n  return [{ json: { _empty: true, stage: 'top_select', run_id: ctx.run_id } }];\n}\n\nitems.sort((a, b) => b.json.raw_virality_score - a.json.raw_virality_score);\nconst top = items.slice(0, 20);\n\nconst CATEGORY = {\n  breaking_ai_news: 'news', new_ai_tool: 'tools', tutorial: 'tutorial',\n  workflow: 'automation', ai_agent: 'agents', business_automation: 'business',\n  generative_media: 'creative_ai', benchmark: 'research',\n  contrarian_opinion: 'opinion', prompt_framework: 'prompting',\n  list_thread: 'curated', resource_toolkit: 'resources',\n  drama: 'meta', general: 'other'\n};\n\nreturn top.map(item => {\n  const p = item.json;\n  const reasons = [];\n  if (p.engagement_velocity > 500) reasons.push('high velocity');\n  if (p.has_video) reasons.push('has video');\n  else if (p.has_image) reasons.push('has image');\n  if (p.content_pattern === 'tutorial') reasons.push('practical tutorial');\n  if (p.content_pattern === 'breaking_ai_news') reasons.push('breaking news');\n  if (p.content_pattern === 'workflow') reasons.push('workflow demo');\n  if (p.content_pattern === 'ai_agent') reasons.push('agent example');\n  if (p.comments > 50) reasons.push('strong discussion');\n  if (p.author_followers > 0 && p.views > 0 && p.views / p.author_followers > 2) {\n    reasons.push('underdog spike');\n  }\n\n  return {\n    json: {\n      run_id: p.run_id,\n      scraped_at: p.scraped_at,\n      platform: p.platform || '',\n      author: p.author,\n      post_url: p.post_url,\n      text: String(p.text || '').slice(0, 600),\n      content_pattern: p.content_pattern,\n      raw_virality_score: p.raw_virality_score,\n      likes: p.likes,\n      views: p.views,\n      comments: p.comments,\n      reposts: p.reposts,\n      engagement_total: p.engagement_total,\n      engagement_rate: p.engagement_rate,\n      post_age_hours: p.post_age_hours,\n      filter_reason: `pattern:${p.content_pattern}; velocity:${Math.round(p.engagement_velocity)}; score:${p.raw_virality_score}`,\n      content_category: CATEGORY[p.content_pattern] || 'other',\n      why_it_might_work: reasons.join('; ') || 'high engagement signals'\n    }\n  };\n});"
+      },
+      "id": "3629ee58-37d3-4dae-9f15-3cef9617cd5b",
+      "name": "Select Top Viral Signals",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1936,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "aa1f0a63-9ccb-4f12-be27-bc987625d5bc",
+              "leftValue": "={{ $json._empty }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "df814320-f4d9-4ab9-a615-646b92ba4310",
+      "name": "IF Has Top Posts",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2176,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "8a04e27f-7045-4734-805c-05d9f2384b51",
+              "name": "stage",
+              "value": "no_top_posts",
+              "type": "string"
+            },
+            {
+              "id": "0f021a71-f333-4043-a93f-28a8408dab8c",
+              "name": "message",
+              "value": "No posts passed the engagement floor.",
+              "type": "string"
+            },
+            {
+              "id": "0817e095-e268-42d4-87ce-b41f093c7712",
+              "name": "item_count",
+              "value": "=0",
+              "type": "number"
+            },
+            {
+              "id": "dc5edda7-d706-4318-af70-47f2fa4aebad",
+              "name": "error",
+              "value": "",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b596739d-d1d2-476d-ab0a-794cfe61d609",
+      "name": "Set: Log No Top Posts",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1024,
+        656
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_SHEET_URL",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "",
+          "cachedResultUrl": ""
+        }
+      },
+      "id": "9714914b-e85a-416d-a871-fd1c2ac9e45f",
+      "name": "Save Filtered Posts",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2416,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Compact top posts into a single JSON blob for the LLM call.\n// Includes language_output and niche_name so the AI prompt can adapt.\nconst ctx = $('Initialize Run').first().json;\nconst items = $input.all().filter(i => !i.json._empty);\n\nif (items.length === 0) {\n  return [{ json: { _empty: true, stage: 'ai_input', run_id: ctx.run_id } }];\n}\n\nconst compact = items.map(i => ({\n  source_platform: i.json.platform || '',\n  source_author: i.json.author,\n  source_url: i.json.post_url,\n  text: String(i.json.text || '').slice(0, 400),\n  content_pattern: i.json.content_pattern,\n  content_category: i.json.content_category,\n  raw_virality_score: i.json.raw_virality_score,\n  likes: i.json.likes,\n  views: i.json.views,\n  comments: i.json.comments,\n  reposts: i.json.reposts,\n  why_it_might_work: i.json.why_it_might_work\n}));\n\nreturn [{\n  json: {\n    run_id: ctx.run_id,\n    posts_json: JSON.stringify(compact, null, 2),\n    posts_count: compact.length,\n    niche_name: ctx.niche_name,\n    language_output: ctx.language_output\n  }\n}];"
+      },
+      "id": "276b4354-64ed-452c-8aed-bee68b6e1d1b",
+      "name": "Aggregate Posts for AI",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2656,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-5.2",
+          "mode": "list",
+          "cachedResultName": "GPT-5.2"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a content strategist for someone building a personal brand around: {{ $json.niche_name }}.\n\nYou analyze trending niche posts from X, Instagram, TikTok, and YouTube Shorts and turn them into original short-form video ideas for TikTok and Instagram Reels.\n\nANALYSIS PROCESS \u2014 for each post, think through:\n1. What's the underlying pattern? (breaking news, contrarian take, tutorial, demonstration, list, build-in-public)\n2. Why is this getting attention right now? (timing, novelty, controversy, practical value, surprise factor)\n3. Who is the actual audience for the topic? (beginners, builders, business owners, hobbyists)\n4. What's the core insight that makes the topic interesting \u2014 separate from how the original post packaged it?\n5. How could the creator angle this for a 30\u201360s video while staying on-brand for \"{{ $json.niche_name }}\"?\n\nOUTPUT \u2014 for each post, return:\n{\n  \"source_platform\": \"\",\n  \"source_author\": \"\",\n  \"source_url\": \"\",\n  \"original_post_summary\": \"\",\n  \"detected_topic\": \"\",\n  \"content_category\": \"\",\n  \"content_pattern\": \"\",\n  \"viral_mechanism\": \"\",\n  \"key_insight\": \"\",\n  \"idea_title\": \"\",\n  \"hook_ro\": \"\",\n  \"script_angle_ro\": \"\",\n  \"target_audience\": \"\",\n  \"business_value\": \"\",\n  \"difficulty_to_film\": \"easy|medium|hard\",\n  \"originality_score\": 0,\n  \"virality_score\": 0,\n  \"usefulness_score\": 0,\n  \"brand_fit_score\": 0,\n  \"final_score\": 0,\n  \"why_it_works\": \"\",\n  \"recommended_format\": \"\",\n  \"visual_notes\": \"\",\n  \"cta\": \"\"\n}\n\nKEY_INSIGHT \u2014 1 sentence. The core idea behind YOUR video, not a summary of the source. This is the soul of the idea \u2014 what makes it worth filming.\n\nWHY_IT_WORKS \u2014 2-3 sentences in conversational {{ $json.language_output }}. Explain why this idea earns its score by tying the explanation to specific signals: the source post's engagement profile, why the topic resonates with the \"{{ $json.niche_name }}\" audience right now, what makes the hook stop-the-scroll, and what makes the angle different from a generic take. No hype. No \"this will go viral\". No generic marketing language. Be concrete.\n\nGood why_it_works example: \"The original post got high reposts because it shows a concrete result instead of a theory. For solopreneurs, this angle hits a real bottleneck \u2014 manual lead follow-up \u2014 using a tool they already have. The hook leads with the outcome before the build, which beats tutorial videos that bury the result.\"\n\nBad why_it_works example: \"This idea has high viral potential and great brand fit. It will engage the target audience and drive growth.\"\n\nSCORING (0-10 each, final_score 0-100):\n- originality_score: how different your video is from the source post. Low if it's a rewrite, high if it extracts a non-obvious angle.\n- virality_score: hook strength, contrast, surprise, watch-time mechanics\n- usefulness_score: real practical value the viewer can act on\n- brand_fit_score: fit with the \"{{ $json.niche_name }}\" positioning\n- final_score: Math.round((brand_fit*0.3 + usefulness*0.25 + virality*0.25 + originality*0.2) * 10)\n\nWRITING RULES:\n- Write idea_title, key_insight, hook_ro, script_angle_ro, why_it_works in {{ $json.language_output }}.\n- Use clear, spoken {{ $json.language_output }}.\n- Avoid hype, fake guru tone, the word \"viral\", and generic praise.\n- Specificity test: \"Build an AI agent\" fails. \"Build an n8n agent that auto-replies to support emails using your Notion knowledge base\" passes.\n- Prefer hooks that create contrast, curiosity, or immediate visible value.\n\nNOTE: hook_ro and script_angle_ro are legacy column names \u2014 fill in {{ $json.language_output }} regardless of suffix.\n\nReturn ONLY: { \"ideas\": [ {...}, {...} ] }. No markdown. No prose outside the JSON.",
+              "role": "system"
+            },
+            {
+              "content": "=Run ID: {{ $json.run_id }}\nNiche: {{ $json.niche_name }}\nOutput language: {{ $json.language_output }}\n\nPosts to analyze ({{ $json.posts_count }}):\n{{ $json.posts_json }}\n\nReturn ONLY a JSON object: {\"ideas\": [...]}. No markdown."
+            }
+          ]
+        },
+        "jsonOutput": true,
+        "options": {
+          "maxTokens": 20000,
+          "temperature": 1
+        }
+      },
+      "id": "c524d8d8-8e53-496a-8434-c3faa32677ba",
+      "name": "AI Agent: Generate Content Ideas",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        2896,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Initialize Run').first().json;\nconst input = $input.first().json || {};\n\nfunction tryParseString(s) {\n  if (typeof s !== 'string') return null;\n  const cleaned = s.trim().replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();\n  try { return JSON.parse(cleaned); } catch (e) {}\n  const arrM = cleaned.match(/\\[[\\s\\S]*\\]/);\n  const objM = cleaned.match(/\\{[\\s\\S]*\\}/);\n  const cand = arrM ? arrM[0] : (objM ? objM[0] : null);\n  if (cand) { try { return JSON.parse(cand); } catch (e) {} }\n  return null;\n}\n\nfunction findIdeas(node, depth = 0) {\n  if (node == null || depth > 6) return null;\n  if (typeof node === 'string') return findIdeas(tryParseString(node), depth + 1);\n  if (Array.isArray(node)) {\n    if (node.length && typeof node[0] === 'object' && (node[0].idea_title || node[0].hook_ro || node[0].hook)) return node;\n    return null;\n  }\n  if (typeof node !== 'object') return null;\n  if (Array.isArray(node.ideas)) return node.ideas;\n  if (Array.isArray(node.results)) return node.results;\n  if (node.idea_title) return [node];\n  for (const key of ['message', 'content', 'output', 'text', 'data']) {\n    if (node[key] != null) {\n      const found = findIdeas(node[key], depth + 1);\n      if (found) return found;\n    }\n  }\n  if (Array.isArray(node.choices) && node.choices[0]) {\n    const found = findIdeas(node.choices[0], depth + 1);\n    if (found) return found;\n  }\n  return null;\n}\n\n// Pull source posts so we can compute avg_views per idea (matched by source_url).\nconst sourcePosts = $('Select Top Viral Signals').all()\n  .filter(i => !i.json._empty)\n  .map(i => i.json);\n\n// Average views across all top posts (used as fallback if URL match fails).\nconst allViews = sourcePosts.map(p => Number(p.views) || 0).filter(v => v > 0);\nconst overallAvg = allViews.length\n  ? Math.round(allViews.reduce((a, b) => a + b, 0) / allViews.length)\n  : 0;\n\nconst ideas = findIdeas(input) || [];\n\nif (ideas.length === 0) {\n  return [{ json: { _parse_error: true, run_id: ctx.run_id, raw_output: JSON.stringify(input).slice(0, 1500) } }];\n}\n\nreturn ideas.map(o => {\n  o = o || {};\n  const url = String(o.source_url || '');\n  const match = sourcePosts.find(p => p.post_url === url);\n  const avg_views = match ? (Number(match.views) || 0) : overallAvg;\n\n  return {\n    json: {\n      idea_title: String(o.idea_title || ''),\n      business_value: String(o.business_value || ''),\n      why_it_works: String(o.why_it_works || ''),\n      hook_ro: String(o.hook_ro || o.hook || ''),\n      script_angle_ro: String(o.script_angle_ro || o.script_angle || ''),\n      avg_views\n    }\n  };\n});"
+      },
+      "id": "e28d95a5-896d-412e-a9cf-1882926abd27",
+      "name": "Parse AI Ideas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3184,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "7b68ac97-aa1a-465c-8b4d-2beb144242a5",
+              "leftValue": "={{ $json._parse_error }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "1f2d802b-cf8f-4b16-8394-6189f9d75d1e",
+      "name": "IF Parse OK",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3376,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "4481aa33-e5e8-48e8-a62f-cf91c2487170",
+              "name": "run_id",
+              "value": "={{ $json.run_id }}",
+              "type": "string"
+            },
+            {
+              "id": "2eda542f-a433-4321-8e37-cfc277e6c7f4",
+              "name": "timestamp",
+              "value": "={{ new Date().toISOString() }}",
+              "type": "string"
+            },
+            {
+              "id": "cc67df59-0178-4a05-8944-773745efb9e1",
+              "name": "stage",
+              "value": "ai_parse_error",
+              "type": "string"
+            },
+            {
+              "id": "fe04052d-6ecd-4e21-ac26-d78fe42e69ee",
+              "name": "message",
+              "value": "AI returned non-parseable output. See raw_output.",
+              "type": "string"
+            },
+            {
+              "id": "72e99527-cddd-4dae-b0ca-e62c957f43bf",
+              "name": "item_count",
+              "value": "=0",
+              "type": "number"
+            },
+            {
+              "id": "97970c3b-c876-44bd-8cb4-c43b420b3714",
+              "name": "error",
+              "value": "={{ $json.raw_output }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "43884064-1447-4e07-a08a-d4a65c12a222",
+      "name": "Set: Log AI Parse Error",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3616,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Keep ideas with final_score >= 70, top 10. Otherwise top 3 marked needs_review.\nconst items = $input.all().filter(i => !i.json._parse_error);\nif (items.length === 0) {\n  return [{ json: { _empty: true, stage: 'rank_ideas' } }];\n}\n\nitems.sort((a, b) => b.json.final_score - a.json.final_score);\n\nconst high = items.filter(i => i.json.final_score >= 70).slice(0, 10);\nif (high.length > 0) return high;\n\nreturn items.slice(0, 3).map(i => ({\n  json: { ...i.json, status: 'needs_review' }\n}));"
+      },
+      "id": "ce7ff2e1-3712-4ca4-8f66-00666a652997",
+      "name": "Filter & Rank Ideas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3616,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_SHEET_URL",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        }
+      },
+      "id": "31602720-63b1-4f90-87c6-91b0d9c5f057",
+      "name": "Save AI Content Ideas",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3856,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Initialize Run').first().json;\n\nlet rawCount = 0;\ntry {\n  rawCount = ($('Calculate Virality Scores').all() || []).filter(i => !i.json._empty).length;\n} catch (e) {}\n\nlet filteredCount = 0;\ntry {\n  filteredCount = ($('Select Top Viral Signals').all() || []).filter(i => !i.json._empty).length;\n} catch (e) {}\n\nconst ideas = $input.all().filter(i => !i.json._empty && !i.json._parse_error);\nconst finalCount = ideas.length;\n\nlet topTitle = '\u2014';\nlet topScore = 0;\nif (finalCount > 0) {\n  const sorted = [...ideas].sort((a, b) => b.json.final_score - a.json.final_score);\n  topTitle = sorted[0].json.idea_title || '\u2014';\n  topScore = sorted[0].json.final_score || 0;\n}\n\nconst text =\n`AI Content Radar finished.\nNiche: ${ctx.niche_name}\nRun: ${ctx.run_id}\nWindow: last ${ctx.time_window_days} days\nRaw posts: ${rawCount}\nFiltered posts: ${filteredCount}\nFinal ideas: ${finalCount}\nTop idea: ${topTitle} \u2014 score ${topScore}`;\n\nreturn [{ json: { run_id: ctx.run_id, summary_text: text, finalCount } }];"
+      },
+      "id": "c91daea8-47ab-4252-abb7-4a4099e8f068",
+      "name": "Build Telegram Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4096,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Initialize Run').first().json;\nconst input = $input.first().json || {};\nreturn [{\n  json: {\n    run_id: ctx.run_id,\n    timestamp: new Date().toISOString(),\n    stage: input.stage || 'unknown',\n    message: input.message || '',\n    item_count: input.item_count || 0,\n    error: input.error || ''\n  }\n}];"
+      },
+      "id": "d0f500c9-a4be-46c6-be5b-56d17ee3a045",
+      "name": "Build Log Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2480,
+        816
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_SHEET_URL",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        }
+      },
+      "id": "3202387f-ef6e-4abe-a7c1-093cbf744449",
+      "name": "Append to System_Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2720,
+        816
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "=",
+        "text": "={{ $json.summary_text }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        4320,
+        288
+      ],
+      "id": "20938790-2652-4aaa-bacf-7904ae9be410",
+      "name": "Send a text message",
+      "webhookId": "b9f95c58-349f-4441-9c4b-bc0820795a53"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Config": {
+      "main": [
+        [
+          {
+            "node": "Initialize Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Initialize Run": {
+      "main": [
+        [
+          {
+            "node": "Build Platform Inputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Platform Inputs": {
+      "main": [
+        [
+          {
+            "node": "Switch by Platform",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch by Platform": {
+      "main": [
+        [
+          {
+            "node": "Prepare X Input",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Instagram Input",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare TikTok Input",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare YouTube Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare X Input": {
+      "main": [
+        [
+          {
+            "node": "Scrape X via Apify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scrape X via Apify": {
+      "main": [
+        [
+          {
+            "node": "Normalize X Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize X Posts": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Instagram Input": {
+      "main": [
+        [
+          {
+            "node": "Scrape Instagram via Apify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scrape Instagram via Apify": {
+      "main": [
+        [
+          {
+            "node": "Normalize Instagram Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Instagram Posts": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Prepare TikTok Input": {
+      "main": [
+        [
+          {
+            "node": "Scrape TikTok via Apify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scrape TikTok via Apify": {
+      "main": [
+        [
+          {
+            "node": "Normalize TikTok Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize TikTok Posts": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Prepare YouTube Input": {
+      "main": [
+        [
+          {
+            "node": "Scrape YouTube via Apify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scrape YouTube via Apify": {
+      "main": [
+        [
+          {
+            "node": "Normalize YouTube Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize YouTube Posts": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Filter Last N Days",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Last N Days": {
+      "main": [
+        [
+          {
+            "node": "IF Has Recent Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Has Recent Posts": {
+      "main": [
+        [
+          {
+            "node": "Load Existing Raw Posts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set: Log No Recent Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set: Log No Recent Posts": {
+      "main": [
+        [
+          {
+            "node": "Build Log Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Existing Raw Posts": {
+      "main": [
+        [
+          {
+            "node": "Remove Duplicates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remove Duplicates": {
+      "main": [
+        [
+          {
+            "node": "Calculate Virality Scores",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Virality Scores": {
+      "main": [
+        [
+          {
+            "node": "Format Raw Posts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Select Top Viral Signals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Raw Posts": {
+      "main": [
+        [
+          {
+            "node": "Save Raw Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Top Viral Signals": {
+      "main": [
+        [
+          {
+            "node": "IF Has Top Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Has Top Posts": {
+      "main": [
+        [
+          {
+            "node": "Save Filtered Posts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set: Log No Top Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set: Log No Top Posts": {
+      "main": [
+        [
+          {
+            "node": "Build Log Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Filtered Posts": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Posts for AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Posts for AI": {
+      "main": [
+        [
+          {
+            "node": "AI Agent: Generate Content Ideas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent: Generate Content Ideas": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Ideas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Ideas": {
+      "main": [
+        [
+          {
+            "node": "IF Parse OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Parse OK": {
+      "main": [
+        [
+          {
+            "node": "Filter & Rank Ideas",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set: Log AI Parse Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set: Log AI Parse Error": {
+      "main": [
+        [
+          {
+            "node": "Build Log Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter & Rank Ideas": {
+      "main": [
+        [
+          {
+            "node": "Save AI Content Ideas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save AI Content Ideas": {
+      "main": [
+        [
+          {
+            "node": "Build Telegram Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Telegram Summary": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Log Row": {
+      "main": [
+        [
+          {
+            "node": "Append to System_Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "774197b9-1816-4b52-b94c-76f11b4689ac",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "xu8FHKPxMdgDUZer",
+  "tags": []
+}
